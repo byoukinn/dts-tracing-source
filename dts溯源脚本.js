@@ -8,38 +8,55 @@
  	3.在溯源界面，无别名或者别名相同的情况，标绿色，需要修改的部分标红色，修改后的部分标蓝色
  	4.增加全量版本的sql解析器，不通过\n符来拆除行，增加了对多行case when的兼容
  	5.增加快捷键，打开来源节点页面，按alt+x就自动执行脚本
+ 	6.增加了时长可控制，按alt+p调出控制框，按alt+q切换血缘关系折叠状态，判断字段是否正确的方式改成为由字段页面取文字来对比，增加case when的解析力，兼容性更强
  */
 // 嵌入样式
-var styleNode = document.createElement('style')
-styleNode.appendChild(document.createTextNode('.marked-row{background: pink}.normal-row{background: lightgreen}.modified-row{background: lightblue}'))
-document.head.appendChild(styleNode)
+var $ = sel => document.querySelectorAll(sel);
+let preloadMilsec = 1200
+let rowExpended = false
 let origin = ''
 function auto() {
-	var $ = sel => document.querySelectorAll(sel);
 	var l = $('.ant-tabs-nav .ant-tabs-tab');
 	l[l.length - 3].click();
 	var iframe = $('.ant-modal-body iframe')[0]
 	setTimeout(function () {
 		var sql = iframe.contentWindow.getCode()
 		origin = sql
-		var mismatchColNums = getMismatchAndPrintRelation(sql)
+		var mismatchColDatas = getMismatchAndPrintRelation(sql)
+		var mismatched = mismatchColDatas.map()
 		setTimeout(function() {
 			l[l.length - 2].click();
-			$('.ant-tabs-tabpane-active .ant-table-row-collapsed').forEach(e => e.click());
-			$('.ant-tabs-tabpane-active .ant-tabs-tab[aria-selected=false]').forEach(e => e.click());
-			$('.ant-tabs-tabpane-active .ant-tabs-large .ant-btn.ant-btn-primary').forEach(e => e.click());
-			$('.ant-tabs-tabpane-active .ant-table-row-expanded').forEach(e => e.click());
-			$('.ant-tabs-tabpane-active .ant-table-row-expand-icon-cell').forEach((e, i) => {
-				mismatchColNums.includes(i) 
-						? e.classList.add('marked-row')
-						: e.classList.add('normal-row')
-				e.querySelector('.ant-table-row-expand-icon').addEventListener('click', function() {e.classList.add('modified-row')})
+			toggleAllRowExpended() // 展开折叠的
+			$('.ant-tabs-tabpane-active .ant-tabs-tab[aria-selected=false]').forEach(e => e.click()); // 切换到血缘关系
+			$('.ant-table-placeholder').forEach(e => { 
+				var panel = e.parentElement.parentElement.parentElement.parentElement.parentElement.parentElement
+				panel.querySelectorAll('.ant-btn-primary')[0].click() // 找到没有血缘关系的，自动添加
+				var rowKey = panel.parentElement.parentElement.parentElement.parentElement.parentElement.parentElement.parentElement.dataset.rowKey.split('-')[0]
+				// 给自动添加的上色，错则marked，正确则normal
+				var rowMain = $('.ant-tabs-tabpane-active .ant-table-row[data-row-key="'+rowKey+'"]')[0]
+				var condText = rowMain.querySelector('.ant-table-row-cell-break-word')[0].innerText
+				var found = mismatchColDatas.find(e => e['目标'] == condText)
+				var colorType = (found && found['源表'] != condText) || mismatchColDatas.length < 1 ? 'marked-row' : 'normal-row'
+				rowMain.classList.add(colorType) 
+				// 
+				$('.ant-tabs-tabpane-active .ant-table-row[data-row-key="'+rowKey+'"] .ant-table-row-expand-icon').addEventListener('click', function() {
+					rowMain.classList.add('modified-row')}
+				)
 			})
+			toggleAllRowExpended(); // 折起展开的
+			// $('.ant-tabs-tabpane-active .ant-table-row-expand-icon-cell').forEach((e, i) => {
+			// 	// console.log(i, e)
+			// 	mismatchColDatas.includes(i) 
+			// 			? e.classList.add('marked-row')
+			// 			: e.classList.add('normal-row')
+			// 	e.querySelector('.ant-table-row-expand-icon').addEventListener('click', function() {e.classList.add('modified-row')})
+			// })
  			}, 1000)
-	}, 200)
+	}, preloadMilsec)
 }
 
 function getMismatchAndPrintRelation( sql ) {
+	// TODO：distinct 的时候
 	var a_FuncReg = /\((\w*\.?\w+),.*[ASas]{2}\s+(\w+)/ // 有函数 跟逗号 写as
 	var n_FuncReg = /\((\w*\.?\w+),.*\s+(\w+)/ // 有函数  跟逗号 没写as
 	var a_FuncReg1 = /\((\w*\.?\w+),?.*[ASas]{2}\s+(\w+)/ // 有函数 写as
@@ -59,17 +76,22 @@ function getMismatchAndPrintRelation( sql ) {
 		n_QuotaReg,
 	]
 	// 数据分组处理
-	let arr = splitSql(sql.substr(7, sql.toLowerCase().indexOf('from')-7).trim())
+	let arr = splitSql(sql)
 	let colNums = []
 	// 显示
 	let datas = []
 	let found = false
+	let err = false
 	for (var k = 0; k < arr.length; k++) {
 		for (var i = 0; i < regs.length; i++) {
 			var s = arr[k].match(regs[i])
 			if (s && s.length) {
 				if (s[1] != s[2] && s[1].indexOf("'")) {
 					found = true
+					if (['case', 'then', 'else'].includes(s[1])) {
+						err = true
+						break
+					}
 					datas.push({'源表': s[1], '目标': s[2]})
 					colNums.push(k)
 				}
@@ -77,48 +99,117 @@ function getMismatchAndPrintRelation( sql ) {
 			}
 		}
 	}
-	if (found) {
+	if (err) {
+		console.group('%cERRO%c该SQL过于复杂，所列表不能作为参考', 'padding:2px 4px;background: pink', 'padding:2px 4px;background: #666;color:white')
+		console.log(sql)
+
+			console.groupCollapsed('%c参考表（仅供参考，点击查看）', 'padding:2px 4px;background: pink')
+			console.table(datas, ['源表', '目标'])
+			console.groupEnd()
+
+		console.groupEnd()
+	} else if (found) {
 		console.table(datas, ['源表', '目标'])
 	} else {
 		// NO AS OR STAR
-		console.groupCollapsed('%cNAOS%c没有对比项或者原sql是星号(点此展开原sql', 'padding:2px 4px;background: greenyellow', 'padding:2px 4px;background: #666;color:white')
-		console.log(origin)
+		console.group('%cNAOS%c没有可对比项或原sql是星号', 'padding:2px 4px;background: greenyellow', 'padding:2px 4px;background: #666;color:white')
+		console.log(sql)
 		console.groupEnd()
 	}
-	return colNums
+	return datas
 }
 
-function splitSql(sql) {
+function splitSql(originSql) {
+	var lowerCaseSql = originSql.toLowerCase()
+	sql = lowerCaseSql.substr(7, lowerCaseSql.indexOf('from')-7).trim()
 	var stack = []
 	var ret = []
+	var caseIndexs = [] // 存有case的所有下标
+	var endIndexs = [] // 存有end的所有下标
 	var start = 0, cnt = 0
 	var prevChar = ''
 	var nextChar = ''
-	for (i of sql) {
-	    cnt += 1
-    	var prevChar = cnt > 0 ? sql[cnt-2] : '' 
-		var nextChar = cnt != sql.length ? sql[cnt] : '' 
-	    // console.log(cnt, i)
-	    switch (i) {
+	var isStr = false
+	var inCase = false
+
+	while(cnt != -1) {
+	    cnt = sql.indexOf('case', cnt + 1)
+	    caseIndexs.push(cnt)
+	    if (cnt == -1) break;
+	    cnt = sql.indexOf('end', cnt + 1)
+	    endIndexs.push(cnt)
+	}
+	caseIndexs.pop() // 最后一个一定是 -1， 不需要
+
+	for (var i = 0, len = sql.length; i < len; i++) {
+		var c = sql[i]
+		// 找case when end 
+		if (i == caseIndexs[0]) {
+			var k = sql.indexOf(',', endIndexs[0])
+			ret.push(sql.substr(i, k-i))
+			caseIndexs.shift()
+			endIndexs.shift()
+			i = k
+			start = k
+		}
+    	var prevChar = i > 0 ? sql[i-2] : '' 
+		var nextChar = i != sql.length ? sql[i] : '' 
+	    // console.log(i, c)
+	    switch (c) {
 	        case '(': stack.push(1); break;
 	        case ')': stack.pop(); break;
-	        case '-': if (prevChar == '-') {stack.push(2)}; break;
-	        case '/': prevChar == '*' ? (stack.pop(), start=cnt) : nextChar == '*' ? stack.push(2) : undefined; break;
-	        case '\n': if (stack[stack.length-1] == 2) {stack.pop(); start=cnt}; break;
+	        // 有注释的地方清洗一下
+	        case "'": isStr = !isStr; break; // 字符串里的不算
+	        case '-': if (prevChar == '-' && !isStr) {stack.push(2)}; break;
+	        case '/': prevChar == '*' ? (stack.pop(), start=i) : nextChar == '*' ? stack.push(2) : undefined; break;
+	        case '\n': if (stack[stack.length-1] == 2) {stack.pop(); start=i}; break;
 	        case ',': if (!stack.length) {
-	            ret.push(sql.substr(start, cnt-1-start).trim()); 
-	            start = cnt;
+	            ret.push(sql.substr(start, i-1-start).trim()); 
+	            start = i;
 	        }; break;
 	    }
 	}
-	var r = sql.substr(start, sql.length)
+	var r = originSql.substr(start, originSql.length)
 	ret.push(r.substr(0, r.indexOf('--')-1).trim()); 
 	return ret
 }
 
-window.addEventListener("keyup", e => {
-    if(e.code == 'KeyX' && e.altKey) {auto()}
-})
+function configurePreloadTime() {
+	let t = prompt('输入需要的等待延迟时间（默认200ms）（网络比较卡的调高点）', 1200)
+	if (isNaN(t)) {
+		while (!isNaN(t)) {
+			alert('请输入一个数字（如果要1秒则输入1000）')
+			t = prompt('输入需要的等待延迟时间（默认1200ms）（网络比较卡的调高点）', 1200)
+		}
+	}
+	preloadMilsec=parseInt(t)
+}
+
+function toggleAllRowExpended() {
+	if (rowExpended) {
+		$('.ant-tabs-tabpane-active .ant-table-row-expanded').forEach(e => e.click());
+	} else {
+		$('.ant-tabs-tabpane-active .ant-table-row-collapsed').forEach(e => e.click());
+	}
+	rowExpended = !rowExpended
+}
+
+function createStyle() {
+	// 创建样式
+	var styleNode = document.createElement('style')
+	styleNode.appendChild(document.createTextNode('.marked-row{background: pink}.normal-row{background: lightgreen}.modified-row{background: lightblue}'))
+	document.head.appendChild(styleNode)
+}
+
+function setupAllStepAndConfiguration() {
+	createStyle()
+	window.addEventListener("keyup", e => {
+	    if(e.code == 'KeyX' && e.altKey) {auto()} // 开始执行脚本
+	    else if(e.code == 'KeyP' && e.altKey) {configurePreloadTime()} // 设置预加载时间
+	    else if(e.code == 'KeyQ' && e.altKey) {toggleAllRowExpended()} // 翻盖
+	})
+}
+
+setupAllStepAndConfiguration()
 
 // 压缩后的代码
-function auto(){var t=function(t){return document.querySelectorAll(t)},e=t(".ant-tabs-nav .ant-tabs-tab");e[e.length-3].click();var a=t(".ant-modal-body iframe")[0];setTimeout(function(){var n=a.contentWindow.getCode();origin=n;var r=getMismatchAndPrintRelation(n);setTimeout(function(){e[e.length-2].click(),t(".ant-tabs-tabpane-active .ant-table-row-collapsed").forEach(function(t){return t.click()}),t(".ant-tabs-tabpane-active .ant-tabs-tab[aria-selected=false]").forEach(function(t){return t.click()}),t(".ant-tabs-tabpane-active .ant-tabs-large .ant-btn.ant-btn-primary").forEach(function(t){return t.click()}),t(".ant-tabs-tabpane-active .ant-table-row-expanded").forEach(function(t){return t.click()}),t(".ant-tabs-tabpane-active .ant-table-row-expand-icon-cell").forEach(function(t,e){r.includes(e)?t.classList.add("marked-row"):t.classList.add("normal-row"),t.querySelector(".ant-table-row-expand-icon").addEventListener("click",function(){t.classList.add("modified-row")})})},1e3)},200)}function getMismatchAndPrintRelation(t){for(var e=/\((\w*\.?\w+),.*[ASas]{2}\s+(\w+)/,a=/\((\w*\.?\w+),.*\s+(\w+)/,n=/\((\w*\.?\w+),?.*[ASas]{2}\s+(\w+)/,r=/\((\w*\.?\w+),?.*\s+(\w+)/,o=/case\s*when\s*(\w*.?\w+).*[ASas]{2}\s+(\w+)/,c=/case\s*when\s*(\w*.?\w+).*\s+(\w+)/,s=/(\'?\w*\.?\w+\'?).*[ASas]{2}\s+(\w+)/,i=/(\'?\w*\.?\w+\'?).*\s+(\w+)/,l=[e,a,n,r,o,c,s,i],d=splitSql(t.substr(7,t.toLowerCase().indexOf("from")-7).trim()),u=[],w=[],b=!1,p=0;p<d.length;p++)for(var h=0;h<l.length;h++){var f=d[p].match(l[h]);if(f&&f.length){f[1]!=f[2]&&f[1].indexOf("'")&&(b=!0,w.push({"源表":f[1],"目标":f[2]}),u.push(p));break}}return b?console.table(w,["源表","目标"]):(console.groupCollapsed("%cNAOS%c没有对比项或者原sql是星号(点此展开原sql","padding:2px 4px;background: greenyellow","padding:2px 4px;background: #666;color:white"),console.log(origin),console.groupEnd()),u}function splitSql(t){var e=[],a=[],n=0,r=0,o="",c=!0,s=!1,l=void 0;try{for(var d,u=t[Symbol.iterator]();!(c=(d=u.next()).done);c=!0){i=d.value,r+=1;var o=r>0?t[r-2]:"";switch(r!=t.length&&t[r],i){case"(":e.push(1);break;case")":e.pop();break;case"-":"-"==o&&e.push(2);break;case"/":"*"==o&&(e.pop(),n=r);break;case"\n":2==e[e.length-1]&&(e.pop(),n=r);break;case",":e.length||(a.push(t.substr(n,r-1-n).trim()),n=r)}}}catch(t){s=!0,l=t}finally{try{!c&&u.return&&u.return()}finally{if(s)throw l}}var w=t.substr(n,t.length);return a.push(w.substr(0,w.indexOf("--")-1).trim()),a}var styleNode=document.createElement("style");styleNode.appendChild(document.createTextNode(".marked-row{background: pink}.normal-row{background: lightgreen}.modified-row{background: lightblue}")),document.head.appendChild(styleNode);var origin="";window.addEventListener("keyup",function(t){"KeyX"==t.code&&t.altKey&&auto()});
