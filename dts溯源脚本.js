@@ -1,7 +1,7 @@
 /**
  * scriptName：dts溯源脚本
  * author：BK
- * lastEdit：2020-8-26 13:20:50
+ * lastEdit：2020-8-31 09:35:28
  * feature：
  	1.全自动点击溯源，打开来源节点，控制台输入auto()就可以实现
  	2.从sql分析排查哪些字段有别名
@@ -23,7 +23,6 @@ function auto() {
 		var sql = iframe.contentWindow.getCode()
 		origin = sql
 		var mismatchColDatas = getMismatchAndPrintRelation(sql)
-		var mismatched = mismatchColDatas.map()
 		setTimeout(function() {
 			l[l.length - 2].click();
 			toggleAllRowExpended() // 展开折叠的
@@ -33,17 +32,18 @@ function auto() {
 				panel.querySelectorAll('.ant-btn-primary')[0].click() // 找到没有血缘关系的，自动添加
 				var rowKey = panel.parentElement.parentElement.parentElement.parentElement.parentElement.parentElement.parentElement.dataset.rowKey.split('-')[0]
 				// 给自动添加的上色，错则marked，正确则normal
-				var rowMain = $('.ant-tabs-tabpane-active .ant-table-row[data-row-key="'+rowKey+'"]')[0]
-				var condText = rowMain.querySelector('.ant-table-row-cell-break-word')[0].innerText
+				var rowMain = $('.ant-tabs-tabpane-active .ant-table-wrapper .ant-table-tbody>.ant-table-row[data-row-key="'+rowKey+'"]')[0]
+				var condText = rowMain.querySelector('.ant-table-row-cell-break-word').innerText
 				var found = mismatchColDatas.find(e => e['目标'] == condText)
 				var colorType = (found && found['源表'] != condText) || mismatchColDatas.length < 1 ? 'marked-row' : 'normal-row'
 				rowMain.classList.add(colorType) 
-				// 
-				$('.ant-tabs-tabpane-active .ant-table-row[data-row-key="'+rowKey+'"] .ant-table-row-expand-icon').addEventListener('click', function() {
+				$('.ant-tabs-tabpane-active .ant-table-row[data-row-key="'+rowKey+'"] .ant-table-row-expand-icon')[0].addEventListener('click', function() {
 					rowMain.classList.add('modified-row')}
 				)
+				// 
 			})
-			toggleAllRowExpended(); // 折起展开的
+ 
+			
 			// $('.ant-tabs-tabpane-active .ant-table-row-expand-icon-cell').forEach((e, i) => {
 			// 	// console.log(i, e)
 			// 	mismatchColDatas.includes(i) 
